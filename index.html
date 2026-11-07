@@ -39,11 +39,10 @@ button,input,select{font:inherit}button{cursor:pointer}.topbar{height:76px;borde
         <div class="field"><label>How much time do you have?</label><div class="runtime"><input id="minRuntime" type="number" min="0" max="300" value="70" aria-label="Minimum runtime"><span>to</span><input id="maxRuntime" type="number" min="1" max="300" value="150" aria-label="Maximum runtime"></div><p class="hint">Minutes · movies without verified runtimes are excluded.</p></div>
         <div class="field full"><div class="range-head"><label for="balance">What matters most to you?</label><output id="balanceLabel" for="balance">A little of both</output></div><input id="balance" type="range" min="0" max="100" value="50"><div class="range-labels"><span>Audience buzz</span><span>Movie quality</span></div><p class="hint">Slide toward quality for higher ratings, or popularity for movies people are watching.</p></div>
       </div>
-      <details class="tokenbox" id="tokenDetails">
-        <summary>TMDB connection · saved securely on this device</summary>
-        <div class="tokenrow"><input id="token" type="password" autocomplete="off" placeholder="Paste your TMDB Read Access Token" aria-label="TMDB API read access token"><button id="saveToken" type="button">Save connection</button></div>
-        <div class="token-actions"><p class="hint" id="tokenHint">You'll only need to enter this once on this browser. Your token is saved in this browser's local storage and is never added to the GitHub project.</p><button class="forget" id="forgetToken" type="button" hidden>Forget saved token</button></div>
-      </details>
+      <div class="tokenbox" style="margin-top:23px;border-top:1px solid var(--line);padding-top:17px">
+        <div style="display:flex;align-items:center;gap:9px;color:var(--green);font-size:.83rem;font-weight:700"><span class="live-dot"></span> Secure TMDB connection</div>
+        <p class="hint" style="margin-top:7px">What2Watch connects automatically. Your API credentials stay on the secure server and are never requested from visitors.</p>
+      </div>
       <div class="actions"><button class="primary" id="recommend">Find my five movies <span aria-hidden="true">↗</span></button><span id="status" class="status" role="status" aria-live="polite">Connect to TMDB once to get started.</span></div>
     </section>
     <aside class="side-card">
@@ -69,21 +68,18 @@ button,input,select{font:inherit}button{cursor:pointer}.topbar{height:76px;borde
   <footer class="footer">Made for people who love a good movie night.<div class="disclaimer">Movie data and images provided by <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer">The Movie Database (TMDB)</a>. This product uses the TMDB API but is not endorsed or certified by TMDB.</div></footer>
 </main>
 <script>
-const API='https://api.themoviedb.org/3';
+const API='https://YOUR-WORKER-NAME.YOUR-SUBDOMAIN.workers.dev';
 const IMG='https://image.tmdb.org/t/p/w342';
-const TOKEN_KEY='what2watch_tmdb_token';
 const $=id=>document.getElementById(id);
 let genres=[];
-function getToken(){return localStorage.getItem(TOKEN_KEY)||$('token').value.trim()}
 function setStatus(msg,error){$('status').textContent=msg;$('status').className='status'+(error?' error':'')}
 function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 async function api(path,params){
-  const token=getToken();
-  if(!token)throw new Error('Add your TMDB Read Access Token in the connection settings first.');
+  if(API.includes('YOUR-WORKER-NAME'))throw new Error('The secure movie-data connection is being configured. Please try again shortly.');
   const url=new URL(API+path);
   Object.entries(params||{}).forEach(([k,v])=>{if(v!==''&&v!==null&&v!==undefined)url.searchParams.set(k,v)});
-  const res=await fetch(url,{headers:{Authorization:'Bearer '+token,accept:'application/json'}});
-  if(!res.ok){let detail='';try{detail=(await res.json()).status_message||''}catch(e){}throw new Error('TMDB request failed ('+res.status+'). '+detail+' Check your saved Read Access Token.')}
+  const res=await fetch(url,{headers:{accept:'application/json'}});
+  if(!res.ok){let detail='';try{detail=(await res.json()).error||''}catch(e){}throw new Error('Movie service unavailable ('+res.status+'). '+detail+' Please try again in a moment.')}
   return res.json();
 }
 async function loadGenres(){
@@ -94,22 +90,6 @@ async function loadGenres(){
   $('connectionLabel').previousElementSibling.style.background='var(--green)';
   setStatus('Connected. Your preferences are ready.');
 }
-function setSavedTokenState(saved){
-  $('forgetToken').hidden=!saved;
-  $('tokenHint').textContent=saved?'Your connection is saved in this browser. You will not need to paste the token again here. It is not stored in the GitHub repository.':'You only need to enter this once on this browser. Your token is saved in this browser and is never added to the GitHub project.';
-}
-$('saveToken').addEventListener('click',async()=>{
-  const token=$('token').value.trim();
-  if(!token){setStatus('Paste your TMDB Read Access Token first.',true);return}
-  localStorage.setItem(TOKEN_KEY,token);
-  try{await loadGenres();setSavedTokenState(true);$('tokenDetails').open=false}
-  catch(e){localStorage.removeItem(TOKEN_KEY);setSavedTokenState(false);setStatus(e.message,true)}
-});
-$('forgetToken').addEventListener('click',()=>{
-  localStorage.removeItem(TOKEN_KEY);$('token').value='';setSavedTokenState(false);
-  $('connectionLabel').textContent='Personalized movie discovery';
-  setStatus('Saved connection removed. Add a token whenever you are ready.');
-});
 $('balance').addEventListener('input',()=>{
   const n=Number($('balance').value);
   $('balanceLabel').textContent=n<35?'Popularity first':n>65?'Quality first':'A little of both';
@@ -141,7 +121,6 @@ function renderMovies(movies,qw,pw){
 $('recommend').addEventListener('click',async()=>{
   const btn=$('recommend');btn.disabled=true;$('output').hidden=true;
   try{
-    if(!getToken()){ $('tokenDetails').open=true;throw new Error('Connect to TMDB first using the connection settings above.')}
     const min=Number($('minRuntime').value),max=Number($('maxRuntime').value);
     if(!Number.isFinite(min)||!Number.isFinite(max)||min<0||max<min)throw new Error('Enter a valid runtime range. The minimum must be less than or equal to the maximum.');
     setStatus('Finding movies and checking their runtimes…');
@@ -161,12 +140,11 @@ $('recommend').addEventListener('click',async()=>{
   finally{btn.disabled=false}
 });
 async function initialize(){
-  const saved=localStorage.getItem(TOKEN_KEY);
-  setSavedTokenState(!!saved);
-  if(saved){
-    $('token').value=saved;
-    try{await loadGenres()}
-    catch(e){localStorage.removeItem(TOKEN_KEY);$('token').value='';setSavedTokenState(false);$('tokenDetails').open=true;setStatus('Your saved token could not connect. Please save a valid token again.',true)}
+  try{await loadGenres()}
+  catch(e){
+    $('connectionLabel').textContent='Connection setup in progress';
+    $('connectionLabel').previousElementSibling.style.background='var(--accent)';
+    setStatus(e.message||'Could not connect to the movie service yet.',true);
   }
 }
 initialize();
