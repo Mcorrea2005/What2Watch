@@ -5,6 +5,7 @@ const ALLOWED_ORIGINS = new Set([
 const ALLOWED_PATHS = [
   /^\/genre\/movie\/list$/,
   /^\/discover\/movie$/,
+  /^\/search\/movie$/,
   /^\/movie\/\d+$/,
   /^\/ratings\/\d+$/
 ];
