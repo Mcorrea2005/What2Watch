@@ -19,7 +19,7 @@ button,input,select{font:inherit}button{cursor:pointer}.topbar{height:76px;borde
 @media(max-width:900px){.workspace{grid-template-columns:1fr}.side-card{display:grid;grid-template-columns:auto 1fr;column-gap:14px}.side-icon{grid-row:span 2}.side-card ul{grid-column:2}.hero{grid-template-columns:1fr}.hero-aside{justify-self:start;max-width:420px}}
 @media(max-width:650px){.topbar{height:65px}.top-note{font-size:.72rem}.shell{padding:38px 16px 25px}.hero{gap:17px;margin-bottom:24px}.hero h1{font-size:3.2rem}.panel{padding:18px}.formgrid{grid-template-columns:1fr}.field.full{grid-column:auto}.movies{grid-template-columns:1fr}.watchlist-grid{grid-template-columns:1fr}.stats{gap:8px}.stat{padding:12px}.stat strong{font-size:1.25rem}.movie{grid-template-columns:94px minmax(0,1fr);gap:12px}.poster{width:94px}.results-top{align-items:start;flex-direction:column}.results-top h2{font-size:1.8rem}.side-card{display:block}.side-icon{margin-bottom:10px}}
 @media(max-width:380px){.movie{grid-template-columns:78px minmax(0,1fr);padding:11px}.poster{width:78px}.movie h3{font-size:.92rem}.overview{font-size:.73rem}.stats .stat span{font-size:.66rem}}
-</style>
+.title-search{margin:0 0 24px;padding:18px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.025)}.title-search label{display:block;font-weight:700;margin-bottom:9px}.search-row{display:flex;gap:10px}.search-row input{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;color:var(--ink)}.search-row input:focus{outline:2px solid var(--accent);outline-offset:2px}.search-row button{border:0;border-radius:10px;padding:0 20px;background:var(--accent);color:#211b1b;font-weight:800}.search-note{color:var(--muted);font-size:.8rem;margin:8px 0 0}@media(max-width:520px){.search-row{flex-direction:column}.search-row button{padding:12px}\n}</style>
 </head>
 <body>
 <header class="topbar">
@@ -34,7 +34,7 @@ button,input,select{font:inherit}button{cursor:pointer}.topbar{height:76px;borde
   <div class="workspace">
     <section class="panel">
       <div class="panel-heading"><h2>Make it your movie night</h2><span class="step">01 / YOUR PREFERENCES</span></div>
-      <div class="formgrid">
+      <form id="titleSearchForm" class="title-search"><label for="titleSearchInput">Already have a movie in mind?</label><div class="search-row"><input id="titleSearchInput" type="search" placeholder="Search a movie title…" autocomplete="off" required><button id="titleSearchButton" type="submit">Search movies</button></div><p class="search-note">Search by title to find a specific movie, or use the preferences below for fresh recommendations.</p></form>\n      <div class="formgrid">
         <div class="field"><label for="genre">What are you in the mood for?</label><select id="genre"><option value="">All genres</option></select></div>
         <div class="field"><label>How much time do you have?</label><div class="runtime"><input id="minRuntime" type="number" min="0" max="300" value="70" aria-label="Minimum runtime"><span>to</span><input id="maxRuntime" type="number" min="1" max="300" value="150" aria-label="Maximum runtime"></div><p class="hint">Minutes · movies without verified runtimes are excluded.</p></div>
         <div class="field"><label for="mood">Set the vibe</label><select id="mood"><option value="">Surprise me — no mood preference</option><option value="cozy">Cozy &amp; feel-good</option><option value="mind">Mind-bending</option><option value="thrill">Edge-of-your-seat</option><option value="uplifting">Uplifting</option><option value="dark">Dark &amp; intense</option></select><p class="hint">A little mood matching helps shape your Top 5.</p></div>
@@ -52,7 +52,7 @@ button,input,select{font:inherit}button{cursor:pointer}.topbar{height:76px;borde
     </aside>
   </div>
   <section id="output" class="output" hidden>
-    <div class="results-top"><div><div class="results-kicker">Curated for your next movie night</div><h2>Your watchlist, sorted.</h2><p>Five picks ranked around the preferences you selected.</p></div></div>
+    <div class="results-top"><div><div class="results-kicker">'+(mode==='search'?'Your title search':'Curated for your next movie night')+'</div><h2>'+(mode==='search'?'Search results':'Your watchlist, sorted.')+'</h2><p>'+(mode==='search'?'Top matches for your search, ranked using your preferences.':'Five picks ranked around the preferences you selected.')+'</p></div></div>
     <div class="stats">
       <div class="stat"><span>Top 5 average rating</span><strong id="avgRating">—</strong></div>
       <div class="stat"><span>Average popularity</span><strong id="avgPopularity">—</strong></div>
@@ -138,7 +138,7 @@ function trailerFor(movie){
   const youtube=videos.filter(v=>v.site==='YouTube'&&v.key);
   return youtube.find(v=>v.type==='Trailer'&&v.official)||youtube.find(v=>v.type==='Trailer')||youtube.find(v=>v.type==='Teaser')||null;
 }
-function renderMovies(movies,qw,pw){
+function renderMovies(movies,qw,pw,mode="recommendations"){
   const pops=normalizePopularity(movies);
   const ranked=movies.map((m,i)=>{const fit=moodFit(m),likedFit=likedGenreFit(m);const base=((Number(m.vote_average)||0)/10)*qw+pops[i]*pw;const personalized=base*.92+likedFit*.08;return {...m,popNorm:pops[i],moodScore:fit,likedFit,score:selectedMood()?personalized*.85+fit*.15:personalized}})
     .sort((a,b)=>b.score-a.score).slice(0,5);
@@ -178,6 +178,26 @@ $('movies').addEventListener('click',event=>{
     setFeedback(id,action,lastRecommendations[id]);
     card.querySelectorAll('[data-action="like"],[data-action="dislike"]').forEach(b=>{const active=reactionFor(id)===b.dataset.action;b.classList.toggle('active-like',active&&b.dataset.action==='like');b.classList.toggle('active-dislike',active&&b.dataset.action==='dislike');b.setAttribute('aria-pressed',String(active))});
   }
+});
+$('titleSearchForm').addEventListener('submit',async(event)=>{
+  event.preventDefault();
+  const form=$('titleSearchForm'),btn=$('titleSearchButton'),query=$('titleSearchInput').value.trim();
+  if(!query)return;
+  btn.disabled=true;$('output').hidden=true;
+  try{
+    setStatus('Searching the movie database for "'+query+'”…');
+    const data=await api('/search/movie',{query,language:'en-US',include_adult:false,page:1});
+    const candidates=(data.results||[]).filter(m=>m&&m.id).slice(0,15);
+    if(!candidates.length)throw new Error('No movies found. Check the title or try a shorter search.');
+    const detailed=await Promise.all(candidates.map(async m=>{try{return await api('/movie/'+m.id,{language:'en-US',append_to_response:'videos'})}catch(e){return m}}));
+    const eligible=detailed.filter(m=>reactionFor(m.id)!=='dislike');
+    if(!eligible.length)throw new Error('Those matches are on your Not for me list. Try another title.');
+    const qw=Number($('balance').value)/100,pw=1-qw;
+    renderMovies(eligible,qw,pw,'search');
+    setStatus('Found '+eligible.length+' matching movie'+(eligible.length===1?'':'s')+'. Showing the top '+Math.min(5,eligible.length)+' match'+(eligible.length===1?'':'es')+'.');
+    $('output').scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(e){setStatus(e.message||'Could not search for that movie. Please try again.',true)}
+  finally{btn.disabled=false}
 });
 $('recommend').addEventListener('click',async()=>{
   const btn=$('recommend');btn.disabled=true;$('output').hidden=true;
