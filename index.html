@@ -61,9 +61,11 @@ button,input,select{font:inherit}button{cursor:pointer}.topbar{height:76px;borde
     <div id="movies" class="movies"></div>
     <div class="transparency">
       <div class="transparency-head"><span>◈</span><h3>Behind the recommendations</h3></div>
-      <p><b>How the score works:</b> recommendation score = (normalized movie rating × quality weight) + (normalized popularity × popularity weight). Your slider sets the two weights, and they always add up to 100%.</p>
+      <p><b>How the score works:</b> quality and popularity are weighted by your slider. What2Watch blends an 8% liked-genre preference into that score, then applies the optional 15% mood-fit bonus.</p>
       <p><b>What the numbers mean:</b> ratings are scaled from TMDB's 0–10 scale. Popularity is normalized across the movies evaluated in this search, so it is a relative comparison rather than a universal score.</p>
       <p><b>Mood matching:</b> when you choose a vibe, What2Watch gives a small bonus to movies whose genres fit that mood. The remaining score still reflects your quality-versus-popularity preference.</p>
+      <p><b>Learning from you:</b> movies marked Not for me are excluded from future results. Likes favor movies with similar genres. Reactions and watchlist are saved in this browser on this device.</p>
+      <p><b>External ratings:</b> IMDb and Rotten Tomatoes scores appear when available from OMDb; missing ratings are left blank rather than estimated.</p>
       <p><b>A note on data:</b> TMDB information changes over time. Vote counts help provide context for ratings, and movies without a verified runtime are excluded when applying your runtime filter. Trailer links are provided by TMDB when available.</p>
     </div>
   </section>
@@ -79,6 +81,9 @@ const STORAGE_KEYS={watchlist:'what2watch-watchlist-v1',feedback:'what2watch-fee
 function readSaved(key){try{return JSON.parse(localStorage.getItem(key)||'{}')}catch(e){return {}}}
 let watchlist=readSaved(STORAGE_KEYS.watchlist);
 let feedback=readSaved(STORAGE_KEYS.feedback);
+let lastRecommendations={};
+function reactionFor(id){const value=feedback[String(id)];return typeof value==='string'?value:(value?.reaction||'')}
+function likedGenreFit(movie){const counts={};Object.values(feedback).forEach(value=>{if((typeof value==='string'?value:value?.reaction)==='like')((typeof value==='object'&&value?.genres)||[]).forEach(id=>{counts[id]=(counts[id]||0)+1})});const total=Object.values(counts).reduce((sum,n)=>sum+n,0);if(!total)return 0;const ids=[...new Set([...(movie.genre_ids||[]),...(movie.genres||[]).map(g=>g.id)])];return Math.min(1,ids.reduce((sum,id)=>sum+(counts[id]||0),0)/Math.min(total,2))}
 function persist(key,value){try{localStorage.setItem(key,JSON.stringify(value))}catch(e){setStatus('Browser storage is unavailable. Your latest changes may not persist.',true)}}
 function isSaved(id){return Boolean(watchlist[String(id)])}
 function renderWatchlist(){
@@ -86,7 +91,7 @@ function renderWatchlist(){
   $('watchlistCount').textContent=items.length+' SAVED';
   $('watchlistItems').innerHTML=items.length?items.map(m=>'<article class="saved-movie">'+(m.poster?'<img class="saved-poster" src="'+escapeHtml(m.poster)+'" alt="">':'<div class="saved-poster" aria-hidden="true">🎬</div>')+'<div class="saved-info"><strong>'+escapeHtml(m.title)+'</strong><span>'+(escapeHtml(m.year)||'Year unknown')+(m.rating?' · ★ '+escapeHtml(m.rating):'')+'</span></div><button class="remove-save" data-action="remove-save" data-id="'+Number(m.id)+'" aria-label="Remove '+escapeHtml(m.title)+' from watchlist">Remove</button></article>').join(''):'<div class="empty">Your watchlist is waiting for its first movie. Save a pick above to keep it here.</div>';
 }
-function setFeedback(id,value){if(feedback[String(id)]===value)delete feedback[String(id)];else feedback[String(id)]=value;persist(STORAGE_KEYS.feedback,feedback)}
+function setFeedback(id,value,movie){if(reactionFor(id)===value)delete feedback[String(id)];else feedback[String(id)]={reaction:value,genres:[...(movie?.genre_ids||[]),...(movie?.genres||[]).map(g=>g.id)],title:movie?.title||''};persist(STORAGE_KEYS.feedback,feedback)}
 function setWatchlist(movie){const id=String(movie.id);if(watchlist[id])delete watchlist[id];else watchlist[id]={id:movie.id,title:movie.title||'Untitled',year:(movie.release_date||'').slice(0,4),rating:(Number(movie.vote_average)||0).toFixed(1),poster:movie.poster_path?IMG+movie.poster_path:''};persist(STORAGE_KEYS.watchlist,watchlist);renderWatchlist()}
 function setStatus(msg,error){$('status').textContent=msg;$('status').className='status'+(error?' error':'')}
 function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -135,8 +140,9 @@ function trailerFor(movie){
 }
 function renderMovies(movies,qw,pw){
   const pops=normalizePopularity(movies);
-  const ranked=movies.map((m,i)=>{const fit=moodFit(m);const base=((Number(m.vote_average)||0)/10)*qw+pops[i]*pw;return {...m,popNorm:pops[i],moodScore:fit,score:selectedMood()?base*.85+fit*.15:base}})
+  const ranked=movies.map((m,i)=>{const fit=moodFit(m),likedFit=likedGenreFit(m);const base=((Number(m.vote_average)||0)/10)*qw+pops[i]*pw;const personalized=base*.92+likedFit*.08;return {...m,popNorm:pops[i],moodScore:fit,likedFit,score:selectedMood()?personalized*.85+fit*.15:personalized}})
     .sort((a,b)=>b.score-a.score).slice(0,5);
+  lastRecommendations=Object.fromEntries(ranked.map(m=>[String(m.id),m]));
   $('movies').innerHTML=ranked.map((m,i)=>{
     const poster=m.poster_path?'<img class="poster" src="'+IMG+m.poster_path+'" alt="Poster for '+escapeHtml(m.title)+'" loading="lazy">':'<div class="poster placeholder" aria-label="No poster">🎬</div>';
     const year=(m.release_date||'').slice(0,4)||'Year unknown';
@@ -144,10 +150,11 @@ function renderMovies(movies,qw,pw){
     const overview=m.overview||'No overview is available from TMDB.';
     const trailer=trailerFor(m);
     const trailerLink=trailer?'<a class="trailer-link" href="https://www.youtube.com/watch?v='+encodeURIComponent(trailer.key)+'" target="_blank" rel="noopener noreferrer">▶ Watch trailer</a>':'<span class="no-trailer">Trailer unavailable</span>';
-    const id=String(m.id),reaction=feedback[id]||'';
+    const id=String(m.id),reaction=reactionFor(id);
     const controls='<div class="movie-actions"><button class="movie-action '+(isSaved(m.id)?'active-save':'')+'" data-action="save" data-id="'+Number(m.id)+'">'+(isSaved(m.id)?'✓ Saved':'＋ Watchlist')+'</button><button class="movie-action '+(reaction==='like'?'active-like':'')+'" data-action="like" data-id="'+Number(m.id)+'" aria-pressed="'+(reaction==='like')+'">👍 Like</button><button class="movie-action '+(reaction==='dislike'?'active-dislike':'')+'" data-action="dislike" data-id="'+Number(m.id)+'" aria-pressed="'+(reaction==='dislike')+'">👎 Not for me</button></div>';
-    return '<article class="movie">'+poster+'<div><div class="rank">Pick 0'+(i+1)+'</div><h3>'+escapeHtml(m.title||'Untitled')+'</h3><div class="meta">'+year+' · '+runtime+' · ★ '+(Number(m.vote_average)||0).toFixed(1)+'/10</div><div class="score">Match score '+(m.score*100).toFixed(1)+'/100</div><p class="overview">'+escapeHtml(overview.length>190?overview.slice(0,187)+'…':overview)+'</p><p class="why"><b>Why it made the list:</b> '+escapeHtml(explain(m,qw,pw,m.popNorm,m.moodScore))+'</p>'+trailerLink+controls+'<div class="votes">'+(Number(m.vote_count)||0).toLocaleString()+' TMDB votes</div></div></article>';
+    return '<article class="movie">'+poster+'<div><div class="rank">Pick 0'+(i+1)+'</div><h3>'+escapeHtml(m.title||'Untitled')+'</h3><div class="meta">'+year+' · '+runtime+' · TMDB ★ '+(Number(m.vote_average)||0).toFixed(1)+'/10</div><div class="external-ratings" data-ratings-for="'+Number(m.id)+'" style="font-size:.72rem;color:var(--accent2);margin:-4px 0 8px">IMDb / Rotten Tomatoes: loading…</div><div class="score">Match score '+(m.score*100).toFixed(1)+'/100</div><p class="overview">'+escapeHtml(overview.length>190?overview.slice(0,187)+'…':overview)+'</p><p class="why"><b>Why it made the list:</b> '+escapeHtml(explain(m,qw,pw,m.popNorm,m.moodScore))+'</p>'+trailerLink+controls+'<div class="votes">'+(Number(m.vote_count)||0).toLocaleString()+' TMDB votes</div></div></article>';
   }).join('');
+  ranked.forEach(async movie=>{try{const ratings=await api('/ratings/'+movie.id);const target=$('movies').querySelector('[data-ratings-for="'+movie.id+'"]');if(target){const bits=[];if(ratings.imdbRating)bits.push('IMDb ★ '+ratings.imdbRating);if(ratings.rottenTomatoes)bits.push('🍅 '+ratings.rottenTomatoes);if(ratings.metascore)bits.push('Metascore '+ratings.metascore);target.textContent=bits.length?bits.join(' · '):(ratings.configured?'External ratings unavailable':'External ratings need setup');}}catch(e){const target=$('movies').querySelector('[data-ratings-for="'+movie.id+'"]');if(target)target.textContent='External ratings unavailable';}});
   $('avgRating').textContent=ranked.length?(ranked.reduce((s,m)=>s+(Number(m.vote_average)||0),0)/ranked.length).toFixed(1)+'/10':'—';
   $('avgPopularity').textContent=ranked.length?(ranked.reduce((s,m)=>s+(Number(m.popularity)||0),0)/ranked.length).toFixed(1):'—';
   $('count').textContent=movies.length;
@@ -168,8 +175,8 @@ $('movies').addEventListener('click',event=>{
     button.classList.toggle('active-save',isSaved(id));button.textContent=isSaved(id)?'✓ Saved':'＋ Watchlist';return;
   }
   if(action==='like'||action==='dislike'){
-    setFeedback(id,action);
-    card.querySelectorAll('[data-action="like"],[data-action="dislike"]').forEach(b=>{const active=feedback[id]===b.dataset.action;b.classList.toggle('active-like',active&&b.dataset.action==='like');b.classList.toggle('active-dislike',active&&b.dataset.action==='dislike');b.setAttribute('aria-pressed',String(active))});
+    setFeedback(id,action,lastRecommendations[id]);
+    card.querySelectorAll('[data-action="like"],[data-action="dislike"]').forEach(b=>{const active=reactionFor(id)===b.dataset.action;b.classList.toggle('active-like',active&&b.dataset.action==='like');b.classList.toggle('active-dislike',active&&b.dataset.action==='dislike');b.setAttribute('aria-pressed',String(active))});
   }
 });
 $('recommend').addEventListener('click',async()=>{
@@ -186,9 +193,11 @@ $('recommend').addEventListener('click',async()=>{
     const detailed=await Promise.all(candidates.map(async m=>{try{return await api('/movie/'+m.id,{language:'en-US',append_to_response:'videos'})}catch(e){return {...m,runtime:null}}}));
     const valid=detailed.filter(m=>typeof m.runtime==='number'&&Number.isFinite(m.runtime)&&m.runtime>=min&&m.runtime<=max);
     if(!valid.length)throw new Error('No movies with verified runtimes matched that range. Try widening your runtime filters.');
+    const eligible=valid.filter(m=>reactionFor(m.id)!=='dislike');
+    if(!eligible.length)throw new Error('All movies matching these filters are on your Not for me list. Try another genre or a wider runtime range.');
     const qw=Number($('balance').value)/100,pw=1-qw;
-    renderMovies(valid,qw,pw);
-    setStatus('Done. Ranked '+Math.min(5,valid.length)+' picks from '+valid.length+' movies that matched your filters.');
+    renderMovies(eligible,qw,pw);
+    setStatus('Done. Ranked '+Math.min(5,eligible.length)+' picks after excluding '+(valid.length-eligible.length)+' movies marked Not for me.');
     $('output').scrollIntoView({behavior:'smooth',block:'start'});
   }catch(e){setStatus(e.message||'Something went wrong. Please try again.',true)}
   finally{btn.disabled=false}
