@@ -5,7 +5,8 @@ const ALLOWED_ORIGINS = new Set([
 const ALLOWED_PATHS = [
   /^\/genre\/movie\/list$/,
   /^\/discover\/movie$/,
-  /^\/movie\/\d+$/
+  /^\/movie\/\d+$/,
+  /^\/ratings\/\d+$/
 ];
 
 export default {
@@ -44,6 +45,35 @@ export default {
     if (!env.TMDB_TOKEN) return respond({ error: "Movie service is not configured yet." }, 503);
     if (!ALLOWED_PATHS.some((pattern) => pattern.test(url.pathname))) {
       return respond({ error: "This movie-data endpoint is not available." }, 404);
+    }
+
+    if (url.pathname.startsWith("/ratings/")) {
+      if (!env.OMDB_API_KEY) return respond({ configured: false, imdbRating: null, rottenTomatoes: null, metascore: null });
+      try {
+        const movieId = url.pathname.split("/").pop();
+        const idsResponse = await fetch(TMDB_BASE + "/movie/" + movieId + "/external_ids", {
+          headers: { Authorization: "Bearer " + env.TMDB_TOKEN, Accept: "application/json" }
+        });
+        if (!idsResponse.ok) return respond({ configured: true, imdbRating: null, rottenTomatoes: null, metascore: null });
+        const ids = await idsResponse.json();
+        if (!ids.imdb_id) return respond({ configured: true, imdbRating: null, rottenTomatoes: null, metascore: null });
+        const ratingsUrl = new URL("https://www.omdbapi.com/");
+        ratingsUrl.searchParams.set("i", ids.imdb_id);
+        ratingsUrl.searchParams.set("apikey", env.OMDB_API_KEY);
+        const ratingsResponse = await fetch(ratingsUrl.toString(), { headers: { Accept: "application/json" } });
+        if (!ratingsResponse.ok) return respond({ configured: true, imdbRating: null, rottenTomatoes: null, metascore: null });
+        const ratings = await ratingsResponse.json();
+        if (ratings.Response !== "True") return respond({ configured: true, imdbRating: null, rottenTomatoes: null, metascore: null });
+        const rt = (ratings.Ratings || []).find((item) => item.Source === "Rotten Tomatoes");
+        return respond({
+          configured: true,
+          imdbRating: ratings.imdbRating && ratings.imdbRating !== "N/A" ? ratings.imdbRating : null,
+          rottenTomatoes: rt && rt.Value && rt.Value !== "N/A" ? rt.Value : null,
+          metascore: ratings.Metascore && ratings.Metascore !== "N/A" ? ratings.Metascore : null
+        });
+      } catch {
+        return respond({ configured: true, imdbRating: null, rottenTomatoes: null, metascore: null });
+      }
     }
 
     const target = new URL(TMDB_BASE + url.pathname);
